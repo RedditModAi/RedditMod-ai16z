@@ -1,0 +1,127 @@
+import praw
+import time
+from datetime import datetime, timedelta
+
+# Configuration
+SUBREDDIT_NAME = "redditmodai"
+WELCOME_MESSAGE = "Welcome to r/redditmodai! Be sure to read the rules and enjoy your stay."
+BANNED_KEYWORDS = ["spamword1", "spamword2", "profanity"]
+CHECK_INTERVAL = 30  # seconds
+MODERATOR_USERNAME = "Redditmod"  # This should be the bot's username
+
+# Reply triggers
+HELP_TRIGGER = "!help"
+BOT_MENTION = f"u/{MODERATOR_USERNAME.lower()}"
+
+# Reddit API credentials
+reddit = praw.Reddit(
+    client_id="your_client_id",
+    client_secret="your_client_secret",
+    user_agent="Redditmod AI Bot v1.0",
+    username="your_username",
+    password="your_password",
+)
+
+def is_banned_content(text):
+    """Check if the text contains banned keywords."""
+    for keyword in BANNED_KEYWORDS:
+        if keyword.lower() in text.lower():
+            return True
+    return False
+
+def monitor_subreddit():
+    """Monitor subreddit for new posts and comments."""
+    subreddit = reddit.subreddit(SUBREDDIT_NAME)
+    print(f"Monitoring r/{SUBREDDIT_NAME}...")
+
+    for post in subreddit.new(limit=10):
+        try:
+            # Check if post has author (in rare cases, it can be deleted)
+            if post.author and post.author.name != MODERATOR_USERNAME:
+                # Welcome new users (just an example condition: author has low karma)
+                if post.author.comment_karma < 50 and not post.saved:
+                    post.reply(WELCOME_MESSAGE)
+                    post.save()
+                    print(f"Welcomed new user: {post.author.name}")
+
+                # Check for banned content
+                if is_banned_content(post.title + post.selftext):
+                    post.mod.remove()
+                    print(f"Removed post by {post.author.name}: {post.title}")
+
+        except Exception as e:
+            print(f"Error processing post: {e}")
+
+    reply_to_comments(subreddit)
+
+def reply_to_comments(subreddit):
+    """Check comments for triggers to respond to."""
+    for comment in subreddit.comments(limit=20):
+        try:
+            # Check if the comment has an author and if it's not the bot itself
+            if comment.author and comment.author.name != MODERATOR_USERNAME:
+                # Check for banned content
+                if is_banned_content(comment.body):
+                    comment.mod.remove()
+                    print(f"Removed comment by {comment.author.name}: {comment.body[:50]}...")
+
+                # If comment not saved yet (not replied to by the bot)
+                if not comment.saved:
+                    # Respond to help requests
+                    if HELP_TRIGGER in comment.body.lower():
+                        comment.reply("Hi there! How can I help you today? Feel free to ask any question about the subreddit or its rules.")
+                        comment.save()
+                        print(f"Replied to comment by {comment.author.name} asking for help.")
+
+                    # Respond to direct mentions of the bot
+                    elif BOT_MENTION in comment.body.lower():
+                        comment.reply("You’ve summoned me. What can I do for you?")
+                        comment.save()
+                        print(f"Replied to comment by {comment.author.name} that mentioned the bot.")
+
+        except Exception as e:
+            print(f"Error processing comment: {e}")
+
+def generate_report():
+    """Generate a report of recent moderation activity."""
+    subreddit = reddit.subreddit(SUBREDDIT_NAME)
+    removed_posts = list(subreddit.mod.removed(limit=10))
+    removed_comments = list(subreddit.mod.comments_edited(limit=10))
+
+    print("\nModeration Report:")
+    print("Removed Posts:")
+    for post in removed_posts:
+        try:
+            print(f"- {post.title} by {post.author.name}")
+        except:
+            pass
+
+    print("\nRemoved Comments:")
+    for comment in removed_comments:
+        try:
+            print(f"- {comment.body[:50]}... by {comment.author.name}")
+        except:
+            pass
+
+def main():
+    """Main loop."""
+    last_report_time = datetime.now()
+    while True:
+        try:
+            monitor_subreddit()
+
+            # Generate a moderation report every hour
+            if datetime.now() - last_report_time > timedelta(hours=1):
+                generate_report()
+                last_report_time = datetime.now()
+
+            time.sleep(CHECK_INTERVAL)
+        except KeyboardInterrupt:
+            print("\nExiting...")
+            break
+        except Exception as e:
+            print(f"Error in main loop: {e}")
+            time.sleep(10)
+
+if __name__ == "__main__":
+    main()
